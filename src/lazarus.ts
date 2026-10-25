@@ -379,6 +379,11 @@ export class Lazarus {
       case "2.0.8":
         await this._downloadLazarus();
         break;
+      // Builds FPC trunk + Lazarus trunk via fpcupdeluxe (needed for native
+      // Windows arm64 support, since no official installer exists yet)
+      case "trunk":
+        await this._installTrunk();
+        break;
       case "2.0.6":
       case "2.0.4":
       case "2.0.2":
@@ -764,13 +769,89 @@ export class Lazarus {
     }
   }
 
+  // Builds FPC trunk + Lazarus trunk from source via fpcupdeluxe's headless
+  // `fpcup` console tool (no CLI binary is published, so it's built from
+  // source using a win64 bootstrap compiler - fpcupdeluxe's GUI .exe can't be
+  // scripted). On arm64 hosts, requests a native aarch64-win64 build.
+  private async _installTrunk(): Promise<void> {
+    if (this._Platform !== "win32") {
+      throw new Error(
+        `installLazarus - The "trunk" version is currently only implemented for Windows (got platform: ${this._Platform})`
+      );
+    }
+
+    const isArm64 = this._Arch === "arm64";
+
+    core.info(
+      `_installTrunk - Building FPC trunk + Lazarus trunk via fpcupdeluxe (arch: ${this._Arch})`
+    );
+
+    // Bootstrap: install stable win64 Lazarus/FPC to get a host `fpc` that
+    // can compile the fpcup tool itself.
+    const savedVersion = this._LazarusVersion;
+    this._LazarusVersion = StableVersion;
+    this._Cache.key =
+      this._LazarusVersion + "-" + this._Arch + "-" + this._Platform;
+    await this._downloadLazarus();
+    this._LazarusVersion = savedVersion;
+
+    const trunkDir = path.join(this._getTempDirectory(), "..", "fpcup-trunk");
+    const srcDir = path.join(trunkDir, "fpcupdeluxe-src");
+    const binDir = path.join(trunkDir, "fpcup-bin");
+    const installDir = path.join(trunkDir, "install");
+
+    core.info(`_installTrunk - Cloning fpcupdeluxe sources into ${srcDir}`);
+    await exec(
+      `git clone --depth 1 https://github.com/LongDirtyAnimAlf/fpcupdeluxe.git "${srcDir}"`
+    );
+
+    core.info(`_installTrunk - Compiling fpcup console tool into ${binDir}`);
+    await exec(
+      `fpc -Mobjfpc -Sh -FE"${binDir}" -Fu"${srcDir}\\sources" -Fu"${srcDir}\\sources\\crossinstallers" -Fu"${srcDir}\\sources\\up" "${srcDir}\\fpcup.lpr"`
+    );
+
+    const fpcupExe = path.join(binDir, "fpcup.exe");
+
+    // Skip the IDE GUI/help generation to save time: for CI purposes we only
+    // need `fpc` and `lazbuild` working.
+    let fpcupArgs =
+      `--fpcURL=trunk --lazURL=trunk --installdir="${installDir}" ` +
+      `--noconfirm --verbose --autotools ` +
+      `--skip=helplazarus,helpfpc,bigide,useride`;
+
+    if (isArm64) {
+      // Native aarch64-win64 build (no emulation)
+      fpcupArgs += ` --cputarget=aarch64 --ostarget=win64`;
+    }
+
+    core.info(`_installTrunk - Running: ${fpcupExe} ${fpcupArgs}`);
+    await exec(`"${fpcupExe}" ${fpcupArgs}`);
+
+    const lazarusDir = path.join(installDir, "lazarus");
+    core.addPath(lazarusDir);
+    core.info(`_installTrunk - Adding '${lazarusDir}' to PATH`);
+
+    const fpcBaseDir = path.join(installDir, "fpc", "bin");
+    if (fs.existsSync(fpcBaseDir)) {
+      const fpcBinSubdirs = fs.readdirSync(fpcBaseDir);
+      for (const subdir of fpcBinSubdirs) {
+        const fpcDir = path.join(fpcBaseDir, subdir);
+        core.addPath(fpcDir);
+        core.info(`_installTrunk - Adding '${fpcDir}' to PATH`);
+      }
+    }
+  }
+
   private _getPackageURL(pkg: string): string {
     let result: string = "";
     // Replace periods with undescores due to JSON borking with periods or dashes
     let lazVer = "v" + this._LazarusVersion.replace(/\./gi, "_");
     switch (this._Platform) {
       case "win32":
-        if (this._Arch == "x64") {
+        // Windows arm64 (e.g. windows-11-arm runners) does not have official
+        // native installers yet, but Windows 11 on Arm has built-in x64
+        // emulation, so the regular win64 (x86_64) installer works fine.
+        if (this._Arch == "x64" || this._Arch == "arm64") {
           result = `https://sourceforge.net/projects/lazarus/files/Lazarus%20Windows%2064%20bits/Lazarus%20${this._LazarusVersion}/`;
           result += pkgs["win64"][lazVer];
         } else {

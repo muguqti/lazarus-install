@@ -32,6 +32,7 @@ Possible values:
 | --------------- | ----------- | ------------- |
 | dist            |             | Latest stable |
 | stable          |             | Lazarus 3.6   |
+| trunk           | trunk       | Builds FPC trunk + Lazarus trunk from source (experimental, see note below) |
 | 3.6             | 3.2.2       |               |
 | 3.4             | 3.2.2       |               |
 | 3.2             | 3.2.2       |               |
@@ -68,6 +69,13 @@ Possible values:
 > 'dist' is the Lazarus package that comes with the Ubuntu dist you
 > chose on `runs-on`, while for Windows it's the latest stable (3.6).
 
+> [!WARNING]
+> `trunk` is **experimental**, Windows-only, and builds FPC/Lazarus trunk
+> from source via [fpcupdeluxe](https://github.com/LongDirtyAnimAlf/fpcupdeluxe)
+> (slower than the regular installers). It's currently the only way to get a
+> **native** Windows arm64 (`windows-11-arm`) toolchain, since FPC's
+> arm64-win64 support only exists in trunk.
+
 ### include-packages
 
 List of packages to install. You can ask the action to fetch packages and
@@ -90,9 +98,14 @@ This is a boolean input and will use cache if set to `true`.
 
 At the moment this action only supports:
 
-- Windows (win32-x64)
+- Windows (win32-x64, win32-arm64)
 - Linux (linux-x64)
 - macOS (darwin-x64)
+
+> [!NOTE]
+> On Windows arm64 (`windows-11-arm`), all numbered/`stable`/`dist` versions
+> run via Windows 11's built-in x64 emulation using the win64 installer. Use
+> `lazarus-version: "trunk"` for a native aarch64-win64 toolchain instead.
 
 ### IMPORTANT
 
